@@ -1,83 +1,34 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from typing import Dict, Any, List
-import sqlite3
-from transformers import pipeline
-from mistralai.client import MistralClient
-from mistralai.models.chat_completion import ChatMessage
-import os
-from dotenv import load_dotenv
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from .app.core.config import settings
+from .app.core.logging import setup_logging
+from .app.api.v1.api import api_router
+from .app.db.base import init_db
 
-load_dotenv()
+# Configuration du logging
+setup_logging()
 
-app = FastAPI()
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    version=settings.VERSION,
+    openapi_url=f"{settings.API_V1_STR}/openapi.json"
+)
 
-# Configuration des clients
-classifier = pipeline("text-classification", model="distilbert-base-uncased")
-mistral_client = MistralClient(api_key=os.getenv("MISTRAL_API_KEY"))
+# Configuration CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-class QueryRequest(BaseModel):
-    prompt: str
+# Inclusion des routes
+app.include_router(api_router, prefix=settings.API_V1_STR)
 
-class QueryResponse(BaseModel):
-    data: List[Dict[str, Any]]
-    visualization_type: str
-    title: str
-
-def get_db_connection():
-    return sqlite3.connect('data/analytics.db')
-
-def generate_sql_query(prompt: str) -> str:
-    # Utiliser Mistral pour générer la requête SQL
-    messages = [
-        ChatMessage(role="system", content="You are a SQL expert. Generate a SQL query based on the user's request."),
-        ChatMessage(role="user", content=f"Generate a SQL query for: {prompt}")
-    ]
-    
-    response = mistral_client.chat(
-        model="mistral-tiny",
-        messages=messages
-    )
-    
-    return response.choices[0].message.content
-
-def determine_visualization_type(prompt: str) -> str:
-    # Utiliser le classificateur pour déterminer le type de visualisation
-    result = classifier(prompt)
-    # Logique simple pour déterminer le type de graphique
-    if "trend" in prompt.lower() or "evolution" in prompt.lower():
-        return "line"
-    elif "distribution" in prompt.lower() or "frequency" in prompt.lower():
-        return "histogram"
-    elif "proportion" in prompt.lower() or "percentage" in prompt.lower():
-        return "pie"
-    else:
-        return "bar"
-
-@app.post("/query", response_model=QueryResponse)
-async def process_query(request: QueryRequest):
-    try:
-        # Générer la requête SQL
-        sql_query = generate_sql_query(request.prompt)
-        
-        # Exécuter la requête
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(sql_query)
-        data = [dict(zip([col[0] for col in cursor.description], row)) 
-                for row in cursor.fetchall()]
-        conn.close()
-        
-        # Déterminer le type de visualisation
-        viz_type = determine_visualization_type(request.prompt)
-        
-        return QueryResponse(
-            data=data,
-            visualization_type=viz_type,
-            title=request.prompt
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@app.on_event("startup")
+async def startup_event():
+    init_db()
 
 if __name__ == "__main__":
     import uvicorn

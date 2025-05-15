@@ -12,8 +12,6 @@ services:
     environment:
       - MISTRAL_API_KEY=${MISTRAL_API_KEY}
       - DATABASE_URL=sqlite:///./data/analytics.db
-    depends_on:
-      - db
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
@@ -32,16 +30,4 @@ services:
       backend:
         condition: service_healthy
     volumes:
-      - ./frontend/app:/app/app
-
-  db:
-    image: sqlite:latest
-    volumes:
-      - ./data:/data
-    command: >
-      bash -c "sqlite3 /data/analytics.db < /data/init.sql"
-    healthcheck:
-      test: ["CMD", "sqlite3", "/data/analytics.db", "SELECT 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3 
+      - ./frontend/app:/app/app 
